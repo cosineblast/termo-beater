@@ -7,6 +7,7 @@ import (
     "os"
     "bufio"
     "log"
+    "sync"
 )
 
 type Color int
@@ -22,7 +23,7 @@ type Mask [5]Color
 
 func compare(answer string, guess string) Mask {
 
-    var mask Mask 
+    var mask Mask
 
     for i := 0; i < 5; i++ {
         if answer[i] == guess[i] {
@@ -56,8 +57,8 @@ func computeEntropy(words WordDistribution) float64 {
     return -result
 }
 
-// Given a random variable X, a guess g and a mask m, 
-// it returns Y such that for any answer w, 
+// Given a random variable X, a guess g and a mask m,
+// it returns Y such that for any answer w,
 // P(Y = w) = P(X = w | compare(X, g) = m)
 func restrictDistribution(words WordDistribution, guess string, mask Mask) WordDistribution {
 
@@ -103,11 +104,10 @@ func measureAverageResultingUncertainty(words WordDistribution, guess string) fl
     return result
 }
 
-const wordsFile = "all_words.txt"
 
-func getWords() ([]string, error) {
+func getWords(name string) ([]string, error) {
 
-    f,err := os.Open(wordsFile)
+    f,err := os.Open(name)
 
     if err != nil {
         return nil, err
@@ -127,28 +127,73 @@ func getWords() ([]string, error) {
 
 }
 
-func main() {
-    fmt.Println("Loading words from", wordsFile, "...")
-
-    words, err := getWords()
-
-    if err != nil {
-        log.Fatal(err)
+func saveOutput(output chan struct {string; float64}, file *os.File) {
+    for value := range output {
+        fmt.Println("uncertainty(",value.string,") =", value.float64)
+        file.WriteString(fmt.Sprintf("%s  %f\n", value.string, value.float64))
     }
+}
 
-    fmt.Println("Finished loading", len(words), "words =]")
-
-
+func uniformDistribution(words []string) WordDistribution {
     distribution := make(WordDistribution)
 
     for _, word := range words {
         distribution[word] = 1/float64(len(words))
     }
 
-    for _, word := range words {
-        entropy := measureAverageResultingUncertainty(distribution, word)
+    return distribution
+}
 
-        fmt.Println("uncertainty(",word,") =", entropy)
+const wordsFile = "all_words.txt"
+
+func main() {
+    fmt.Println("Loading words from", wordsFile, "...")
+
+    words, err := getWords(wordsFile)
+
+    if err != nil {
+        log.Fatal(err)
+        return
     }
 
+    fmt.Println("Finished loading", len(words), "words =]")
+
+    // we are going to assume all words are equally probable
+    distribution := uniformDistribution(words)
+
+    file, err := os.Create("output.txt")
+
+    if err != nil {
+        log.Fatal(err)
+        return
+    }
+
+    defer file.Close()
+
+    output := make(chan struct{string; float64}, 32)
+
+    go saveOutput(output, file)
+
+    todo := make(chan string, len(words))
+    for _, word := range words {
+        todo <- word
+    }
+    close(todo)
+
+    var group sync.WaitGroup
+
+    for i := 0; i < 6; i++ {
+        group.Add(1)
+
+        go func() {
+            defer group.Done()
+
+            for word := range todo {
+                entropy := measureAverageResultingUncertainty(distribution, word)
+                output <- struct {string; float64}{word, entropy}
+            }
+        }()
+    }
+
+    group.Wait()
 }
