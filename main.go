@@ -8,6 +8,7 @@ import (
     "bufio"
     "log"
     "sync"
+    "runtime"
 )
 
 type Color int
@@ -83,8 +84,8 @@ func restrictDistribution(words WordDistribution, guess string, mask Mask) WordD
 
 func measureResultingUncertainty(words WordDistribution, guess string, mask Mask) float64 {
     return computeEntropy(restrictDistribution(words, guess, mask))
-
 }
+
 
 func measureAverageResultingUncertainty(words WordDistribution, guess string) float64 {
     maskDistribution := make(map[Mask]float64)
@@ -182,7 +183,7 @@ func main() {
 
     var group sync.WaitGroup
 
-    for i := 0; i < 6; i++ {
+    for i := 0; i < runtime.NumCPU(); i++ {
         group.Add(1)
 
         go func() {
